@@ -1,0 +1,21 @@
+.DS_Store
+
+# Build artifacts
+*.o
+*.obj
+*.out
+*.exe
+*.a
+*.so
+*.dylib
+*.dll
+*.dSYM/
+
+# Common build directories
+build/
+bin/
+dist/
+
+# Local generated binaries
+sample
+src/sample

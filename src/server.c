@@ -8,46 +8,19 @@
 #include "../include/hashtable.h"
 #include "../include/parser.h"
 
-//check whether buffer contains a complete resp style command
-int is_complete(char* buffer, int buf_len){
-    if (buf_len < 4) return 0;
-    if (buffer[0] != '*') return 0;
-
-    //parse argc and check if it is valid
-    char* ptr = buffer;
-    int argc = atoi(ptr + 1);
-    if (argc <= 0) return 0;
-
-    ptr = memchr(ptr,'\n',buffer + buf_len - ptr);
-    if (!ptr) return 0;
-    ptr++;
-
-    //parse through each argument
-    for (int i=0;i<argc;i++){
-        //check if atleast one $N\r\n is present
-        if (ptr >= buffer + buf_len) return 0;
-
-        //check if ptr is at '$'
-        if (*ptr != '$') return 0;
-        int len = atoi(ptr + 1);
-        if (len < 0) return 0;
-
-        ptr = memchr(ptr,'\n',buffer + buf_len - ptr);
-        if (!ptr) return 0;
-        ptr++;
-
-        if (ptr + len + 2 > buffer + buf_len) return 0;
-
-        ptr += len + 2;
+//send commands as a single chunk
+static void send_all(int fd, const char* buffer, size_t len){
+    while (len>0){
+        ssize_t n = send(fd,buffer,len,0);
+        if (n<=0) return;
+        buffer += n;
+        len -= (size_t)(n);
     }
-
-    return 1;
-
 }
 
 //to send simple string
 void send_simple(int client_fd,const char* msg){
-    send(client_fd,msg,strlen(msg),0);
+    send_all(client_fd,msg,strlen(msg));
 }
 
 //to send bulk string
@@ -105,6 +78,10 @@ void handle_command(int client_fd,HashTable* ht,command* cmd){
 
 void start_server(int port){
     HashTable* ht = ht_create(); //create a new hashtable
+    if (!ht) {
+        perror("Hashtable creation failed");
+        exit(1);
+    }
 
     //create server socket
     int server_fd = socket(AF_INET,SOCK_STREAM,0);
@@ -149,38 +126,57 @@ void start_server(int port){
 
         printf("Client connected\n");
 
-        //init client
-        client client;
-        client.fd = client_fd;
-        client.buf_len = 0;
+        char buffer[BUFFER_SIZE];
+        int buf_len = 0;
 
-        //read commands from client
         char chunk[BUFFER_SIZE];
         int bytes;
 
         while ((bytes=recv(client_fd,chunk,BUFFER_SIZE-1,0))>0){
             //reject command if buffer overflows
-            if ((client.buf_len + bytes) > BUFFER_SIZE){
+            if ((buf_len + bytes) > BUFFER_SIZE){
                 send_simple(client_fd, "-ERR command too long\r\n");
-                client.buf_len = 0;
+                buf_len = 0;
                 continue;
             }
             
             //write chunk of command into buffer
-            memcpy(client.buffer + client.buf_len,chunk,bytes);
-            client.buf_len += bytes;
-            client.buffer[client.buf_len] = '\0';
+            memcpy(buffer + buf_len,chunk,bytes);
+            buf_len += bytes;
+            
+            while (buf_len > 0){
+                int used = 0;
 
-            //parse command when it is complete
-            if (is_complete(client.buffer, client.buf_len)){
+                int status = is_complete(buffer, buf_len, &used);
+
+                //incomplete command, wait for more chunks
+                if (status == 0) break;
+
+                //invalid command
+                if (status == -1){
+                    send_simple(client_fd, "-ERR protocol error\r\n");
+                    buf_len = 0;
+                    break;
+                }
+
                 command cmd;
-                if (parse_command(client.buffer, &cmd)){
+                if (parse_command(buffer, used, &cmd)){
                     handle_command(client_fd, ht, &cmd);
                 } else {
                     send_simple(client_fd, "-ERR protocol error\r\n");
                 }
-                client.buf_len = 0;
-            } 
+
+                // Consume the parsed command from the buffer
+                // shift remaining bytes to the front
+                memmove(buffer, buffer + used, (size_t)(buf_len - used));
+                buf_len -= used;
+
+            }
+        }
+
+        //unparsed data leftover in buffer
+        if (buf_len > 0) {
+            send_simple(client_fd, "-ERR protocol error\r\n");
         }
 
         close(client_fd);

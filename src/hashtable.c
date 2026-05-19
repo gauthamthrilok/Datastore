@@ -31,7 +31,7 @@ void ht_set(HashTable *ht, const char *key, const char *value){
     while(entry!=NULL){
         if (strcmp(entry->key,key)==0){
             free(entry->value);
-            entry->value = malloc(strlen(entry->value)+1);
+            entry->value = malloc(strlen(value)+1);
             strcpy(entry->value,value);
             return;
         }

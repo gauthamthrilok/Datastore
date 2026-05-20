@@ -14,12 +14,17 @@ static unsigned int hash(const char *key){
 }
 
 //create a hashtable
-HashTable* ht_create(){
+HashTable* ht_create(void){
     HashTable *ht = malloc(sizeof(HashTable));
     for (int i=0;i<TABLE_SIZE;i++){
         ht->buckets[i] = NULL;  //init all entries to NULL
     }
     return ht;
+}
+
+static int is_expired(Entry *entry){
+    if (entry->expiry == 0) return 0; //no expiry added
+    return time(NULL) > entry->expiry; //check whether current time has exceeded expiry time
 }
 
 //add a new key-value entry into the hash-table
@@ -33,6 +38,7 @@ void ht_set(HashTable *ht, const char *key, const char *value){
             free(entry->value);
             entry->value = malloc(strlen(value)+1);
             strcpy(entry->value,value);
+            entry->expiry = 0;
             return;
         }
         entry = entry->next;
@@ -54,11 +60,26 @@ void ht_set(HashTable *ht, const char *key, const char *value){
 char* ht_get(HashTable *ht, const char *key){
     unsigned int index = hash(key);
     Entry* entry = ht->buckets[index];
+    Entry* prev = NULL;
 
     while(entry!=NULL){
+        Entry* next = entry->next;
         if (strcmp(entry->key,key)==0){
+            //lazy expiry
+            if (is_expired(entry)){
+                if (prev == NULL){
+                    ht->buckets[index] = next;
+                } else {
+                    prev->next = next;
+                }
+                free(entry->key);
+                free(entry->value);
+                free(entry);
+                return NULL;
+            }
             return entry->value;
         }
+        prev = entry->next;
         entry = entry->next;
     }
     return NULL; //key not found
@@ -87,6 +108,57 @@ void ht_delete(HashTable *ht, const char *key){
     }
 }
 
+//set expiry time for a key
+void ht_expire(HashTable *ht, const char *key, int n){
+    unsigned int index = hash(key);
+    Entry *entry = ht->buckets[index];
+    while (entry != NULL){
+        if (strcmp(entry->key,key)==0){
+            entry->expiry = time(NULL) + n;
+            return;
+        }
+        entry = entry->next;
+    }
+}
+
+//scan hashtable and remove all expired keys
+void ht_rm_expired(HashTable *ht){
+    for (int i=0;i<TABLE_SIZE;i++){
+        Entry *entry = ht->buckets[i];
+        Entry *prev = NULL;
+        while (entry != NULL){
+            Entry *next = entry->next; 
+            if (is_expired(entry)){
+                if (prev == NULL){
+                    ht->buckets[i] = next;
+                } else {
+                    prev->next = next;
+                }
+                free(entry->key);
+                free(entry->value);
+                free(entry);
+            } else {
+                prev = entry;
+            }
+            entry = entry->next;
+        }
+    }
+}
+
+int ht_ttl(HashTable *ht, const char *key){
+    unsigned int index = hash(key);
+    Entry *entry = ht->buckets[index];
+
+    while(entry != NULL){
+        if (strcmp(entry->key,key)==0){
+            if (is_expired(entry)) return -2; //key not found
+            if (entry->expiry == 0) return -1; //expiry not set
+            return entry->expiry - time(NULL);
+        }
+        entry = entry->next;
+    }
+    return -2;
+}
 //Free entire hash-table
 void ht_free(HashTable *ht){
     for (int i=0;i<TABLE_SIZE;i++){

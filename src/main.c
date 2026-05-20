@@ -1,6 +1,6 @@
 #include "../include/server.h"
 
-int main(){
+int main(void){
     start_server(6379);
     return 0;
 }

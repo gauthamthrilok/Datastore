@@ -71,6 +71,33 @@ void handle_command(int client_fd,HashTable* ht,command* cmd){
         send_simple(client_fd,"+OK\r\n");
         return;
     } 
+
+    if (strcmp("EXPIRE",cmd->argv[0])==0){
+        if (cmd->argc < 3){
+            send_simple(client_fd, "-ERR too few arguments\r\n");
+            return;
+        }
+        int seconds = atoi(cmd->argv[2]);
+        if (seconds <= 0){
+            send_simple(client_fd, "-ERR invalid expire time\r\n");
+            return;
+        }
+        ht_expire(ht, cmd->argv[1], seconds);
+        send_simple(client_fd,"+OK\r\n");
+        return;
+    }
+
+    if (strcmp("TTL",cmd->argv[0])==0){
+        if (cmd->argc < 2){
+            send_simple(client_fd, "-ERR too few arguments\r\n");
+            return;
+        }
+        int ttl = ht_ttl(ht, cmd->argv[1]);
+        char response[32];
+        snprintf(response,sizeof(response),":%d\r\n",ttl);
+        send_simple(client_fd, response);
+        return;
+    }
         
     send_simple(client_fd,"-ERR unknown command\r\n");
     
@@ -114,6 +141,7 @@ void start_server(int port){
     printf("Datastore listening on port : %d\n", port);
 
     //accept clients
+    int count_requests = 0;
     while(1){
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
@@ -162,6 +190,11 @@ void start_server(int port){
                 command cmd;
                 if (parse_command(buffer, used, &cmd)){
                     handle_command(client_fd, ht, &cmd);
+                    count_requests++;
+                    if (count_requests > 100){
+                        ht_rm_expired(ht);
+                        count_requests = 0;
+                    }
                 } else {
                     send_simple(client_fd, "-ERR protocol error\r\n");
                 }

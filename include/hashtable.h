@@ -24,6 +24,7 @@ void ht_set(HashTable *ht, const char *key, const char *value);
 char* ht_get(HashTable *ht, const char *key);
 int ht_ttl(HashTable *ht, const char *key);
 void ht_expire(HashTable *ht, const char *key, int n);
+void ht_expire_at(HashTable *ht, const char *key,long timestamp);
 void ht_rm_expired(HashTable *ht);
 void ht_delete(HashTable *ht, const char *key);
 void ht_free(HashTable *ht);

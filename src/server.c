@@ -7,6 +7,7 @@
 #include "../include/server.h"
 #include "../include/hashtable.h"
 #include "../include/parser.h"
+#include "../include/persistence.h"
 
 //send commands as a single chunk
 static void send_all(int fd, const char* buffer, size_t len){
@@ -48,6 +49,7 @@ void handle_command(int client_fd,HashTable* ht,command* cmd){
             return;
         }
         ht_set(ht, cmd->argv[1], cmd->argv[2]);
+        aof_log_set(cmd->argv[1],cmd->argv[2]);
         send_simple(client_fd,"+OK\r\n");
         return;
     }
@@ -68,6 +70,7 @@ void handle_command(int client_fd,HashTable* ht,command* cmd){
             return;
         }
         ht_delete(ht,cmd->argv[1]);
+        aof_log_del(cmd->argv[1]);
         send_simple(client_fd,"+OK\r\n");
         return;
     } 
@@ -83,6 +86,8 @@ void handle_command(int client_fd,HashTable* ht,command* cmd){
             return;
         }
         ht_expire(ht, cmd->argv[1], seconds);
+        long timestamp = time(NULL) + seconds;
+        aof_log_expireat(cmd->argv[1], timestamp);
         send_simple(client_fd,"+OK\r\n");
         return;
     }
@@ -107,6 +112,13 @@ void start_server(int port){
     HashTable* ht = ht_create(); //create a new hashtable
     if (!ht) {
         perror("Hashtable creation failed");
+        exit(1);
+    }
+
+    aof_load(ht); //load all command from aof
+
+    if (!aof_open()){
+        perror("Could not open aof");
         exit(1);
     }
 
@@ -216,6 +228,7 @@ void start_server(int port){
         printf("Client disconnected\n");
     }
 
+    aof_close();
     close(server_fd);
     ht_free(ht);
 }

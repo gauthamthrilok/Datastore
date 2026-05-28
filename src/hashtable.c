@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "../include/hashtable.h"
 
 //static hash function which generates an index between 0 and 64 for any key
@@ -115,6 +116,19 @@ void ht_expire(HashTable *ht, const char *key, int n){
     while (entry != NULL){
         if (strcmp(entry->key,key)==0){
             entry->expiry = time(NULL) + n;
+            return;
+        }
+        entry = entry->next;
+    }
+}
+
+//set expiry for commands from aof file
+void ht_expire_at(HashTable *ht, const char *key, long timestamp){
+    unsigned int index = hash(key);
+    Entry *entry = ht->buckets[index];
+    while (entry != NULL){
+        if (strcmp(entry->key,key)==0){
+            entry->expiry = (time_t)timestamp;
             return;
         }
         entry = entry->next;

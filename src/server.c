@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include "../include/server.h"
@@ -108,6 +109,60 @@ void handle_command(int client_fd,HashTable* ht,command* cmd){
     
 }
 
+//to handle commands from each client
+static int handle_client(client *client,HashTable *ht){
+    char chunk[BUFFER_SIZE];
+    ssize_t bytes = recv(client->fd,chunk,BUFFER_SIZE,0);
+
+    //client disconnected
+    if (bytes<=0){
+        //client buffer contains commands which are not parsed yet
+        if (client->buf_len > 0){
+            send_simple(client->fd,"-ERR protocol error\r\n");
+        }
+        return 0;
+    }
+
+    if (client->buf_len + (int)bytes > BUFFER_SIZE){
+        send_simple(client->fd, "-ERR command too large\r\n");
+        client->buf_len = 0;
+        return 1;
+    }
+
+    memcpy(client->buffer + client->buf_len,chunk,(size_t)bytes);
+    client->buf_len += (int)bytes;
+
+    while (client->buf_len > 0){
+        int used = 0;
+        int status = is_complete(client->buffer, client->buf_len, &used);
+
+        if (status == -1){
+            send_simple(client->fd,"-ERR protocol error\r\n");
+            client->buf_len = 0;
+            break;
+        }
+
+        //incomplete command
+        if (status == 0){
+            break;
+        }
+
+        command cmd;
+        if (parse_command(client->buffer, used, &cmd)){
+            handle_command(client->fd, ht, &cmd);
+        } else {
+            send_simple(client->fd,"-ERR protocol error\r\n");
+            break;
+        }
+
+        //consume parsed command and move rest of buffer to the front
+        memmove(client->buffer,client->buffer+used,(size_t)(client->buf_len-used));
+        client->buf_len -= used;
+    }
+
+    return 1;
+}
+
 void start_server(int port){
     HashTable* ht = ht_create(); //create a new hashtable
     if (!ht) {
@@ -120,6 +175,12 @@ void start_server(int port){
     if (!aof_open()){
         perror("Could not open aof");
         exit(1);
+    }
+
+    client clients[MAX_CLIENTS];
+    for (int i=0;i<MAX_CLIENTS;i++){
+        clients[i].fd = -1;
+        clients[i].buf_len = 0;
     }
 
     //create server socket
@@ -155,77 +216,73 @@ void start_server(int port){
     //accept clients
     int count_requests = 0;
     while(1){
-        struct sockaddr_in client_addr;
-        socklen_t client_len = sizeof(client_addr);
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
 
-        int client_fd = accept(server_fd,(struct sockaddr*)&client_addr,&client_len);
-        if (client_fd<0){
-            perror("Accept failure\n");
-            exit(1);
+        FD_SET(server_fd,&read_fds);
+        int max_fd = server_fd;
+        
+        for (int i=0;i<MAX_CLIENTS;i++){
+            if (clients[i].fd != -1){
+                FD_SET(clients[i].fd,&read_fds);
+                if (clients[i].fd > max_fd){
+                    max_fd = clients[i].fd;
+                }
+            }
         }
 
-        printf("Client connected\n");
+        int rv = select(max_fd+1,&read_fds,NULL,NULL,NULL);
 
-        char buffer[BUFFER_SIZE];
-        int buf_len = 0;
+        if (rv<0){
+            perror("Select failure");
+            continue;
+        }
 
-        char chunk[BUFFER_SIZE];
-        int bytes;
+        if (FD_ISSET(server_fd,&read_fds)){
+            struct sockaddr_in client_addr;
+            socklen_t len = sizeof(client_addr);
+            int client_fd = accept(server_fd,(struct sockaddr *)&client_addr,&len);
+            if (client_fd < 0){
+                perror("Accept failure");
+            } else {
+                int slot = -1;
 
-        while ((bytes=recv(client_fd,chunk,BUFFER_SIZE-1,0))>0){
-            //reject command if buffer overflows
-            if ((buf_len + bytes) > BUFFER_SIZE){
-                send_simple(client_fd, "-ERR command too long\r\n");
-                buf_len = 0;
-                continue;
-            }
-            
-            //write chunk of command into buffer
-            memcpy(buffer + buf_len,chunk,bytes);
-            buf_len += bytes;
-            
-            while (buf_len > 0){
-                int used = 0;
-
-                int status = is_complete(buffer, buf_len, &used);
-
-                //incomplete command, wait for more chunks
-                if (status == 0) break;
-
-                //invalid command
-                if (status == -1){
-                    send_simple(client_fd, "-ERR protocol error\r\n");
-                    buf_len = 0;
-                    break;
+                for (int i=0;i<MAX_CLIENTS;i++){
+                    if (clients[i].fd == -1){
+                        slot = i;
+                    }
                 }
 
-                command cmd;
-                if (parse_command(buffer, used, &cmd)){
-                    handle_command(client_fd, ht, &cmd);
+                if (slot == -1){
+                    send_simple(client_fd, "-ERR max clients reached\r\n");
+                    close(client_fd);
+                } else {
+                    clients[slot].fd = client_fd;
+                    printf("Client %d connected in slot %d",client_fd,slot);
+                }
+            }
+        }
+
+        for (int i=0;i<MAX_CLIENTS;i++){
+            if (clients[i].fd != -1){
+                if (FD_ISSET(clients[i].fd,&read_fds)){
+                    int alive = handle_client(&clients[i], ht);
+
+                    if (!alive){
+                        printf("Client %d disconnected from slot %d",clients[i].fd,i);
+                        close(clients[i].fd);
+                        clients[i].fd = -1;
+                        clients[i].buf_len = 0;
+                    }
+
                     count_requests++;
                     if (count_requests > 100){
                         ht_rm_expired(ht);
                         count_requests = 0;
                     }
-                } else {
-                    send_simple(client_fd, "-ERR protocol error\r\n");
                 }
-
-                // Consume the parsed command from the buffer
-                // shift remaining bytes to the front
-                memmove(buffer, buffer + used, (size_t)(buf_len - used));
-                buf_len -= used;
-
             }
         }
-
-        //unparsed data leftover in buffer
-        if (buf_len > 0) {
-            send_simple(client_fd, "-ERR protocol error\r\n");
-        }
-
-        close(client_fd);
-        printf("Client disconnected\n");
     }
 
     aof_close();

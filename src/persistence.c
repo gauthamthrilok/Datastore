@@ -57,7 +57,7 @@ void aof_load(HashTable *ht){
 
         if (strcmp("SET",cmd)==0){
             ht_set(ht, key, value);
-        } else if (strcmp("EXPIRE  ",cmd)==0){
+        } else if (strcmp("EXPIRE",cmd)==0){
             long timestamp = atol(value);
             //store only if not expired
             if (timestamp>(long)time(NULL)){

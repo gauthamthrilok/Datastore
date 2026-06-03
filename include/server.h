@@ -11,6 +11,6 @@ typedef struct {
     int buf_len;
 } client;
 
-void start_server(int port);
+void start_server(int port, int max_keys);
 
 #endif

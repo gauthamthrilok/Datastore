@@ -163,8 +163,8 @@ static int handle_client(client *client,HashTable *ht){
     return 1;
 }
 
-void start_server(int port){
-    HashTable* ht = ht_create(); //create a new hashtable
+void start_server(int port,int max_keys){
+    HashTable* ht = ht_create(max_keys); //create a new hashtable
     if (!ht) {
         perror("Hashtable creation failed");
         exit(1);
@@ -258,7 +258,7 @@ void start_server(int port){
                     close(client_fd);
                 } else {
                     clients[slot].fd = client_fd;
-                    printf("Client %d connected in slot %d",client_fd,slot);
+                    printf("Client %d connected in slot %d\n",client_fd,slot);
                 }
             }
         }
@@ -269,7 +269,7 @@ void start_server(int port){
                     int alive = handle_client(&clients[i], ht);
 
                     if (!alive){
-                        printf("Client %d disconnected from slot %d",clients[i].fd,i);
+                        printf("Client %d disconnected from slot %d\n",clients[i].fd,i);
                         close(clients[i].fd);
                         clients[i].fd = -1;
                         clients[i].buf_len = 0;

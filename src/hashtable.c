@@ -14,12 +14,84 @@ static unsigned int hash(const char *key){
     return hash % TABLE_SIZE;
 }
 
+//to remove a key from doubly-linked list
+static void lru_remove(HashTable *ht, Entry *e){
+    if (e->lru_prev){
+        e->lru_prev->lru_next = e->lru_next;
+    } else { //e is the head
+        ht->head = e->lru_next;
+    }
+
+    if (e->lru_next){
+        e->lru_next->lru_prev = e->lru_prev;
+    } else { //e is the tail
+        ht->tail = e->lru_prev;
+    }
+
+    e->lru_next = NULL;
+    e->lru_prev = NULL;
+}
+
+static void lru_insert(HashTable *ht,Entry *e){
+    e->lru_prev = NULL;
+    e->lru_next = ht->head;
+
+    if (ht->head){
+        ht->head->lru_prev = e;
+    }
+
+    ht->head = e;
+
+    if (ht->tail == NULL){
+        ht->tail = e;
+    }
+}
+
+static void move_to_head(HashTable *ht, Entry *e){
+    if (ht->head == e) return;
+    lru_remove(ht,e);
+    lru_insert(ht,e);
+}
+
+static void evict(HashTable *ht){
+    if (ht->tail == NULL) return;
+
+    printf("Evicting key %s\n",ht->tail->key);
+    Entry *victim = ht->tail;
+    unsigned int index = hash(victim->key);
+    Entry *entry = ht->buckets[index];
+    Entry *prev = NULL;
+
+    while (entry != NULL){
+        if (entry == victim){
+            if (prev == NULL){
+                ht->buckets[index] = entry->next;
+            } else {
+                prev->next = entry->next;
+            }
+            break;
+        }
+        prev = entry;
+        entry = entry->next;
+    }
+
+    lru_remove(ht,victim);
+    free(victim->key);
+    free(victim->value);
+    free(victim);
+    ht->count--;
+}
+
 //create a hashtable
-HashTable* ht_create(void){
+HashTable* ht_create(int max_keys){
     HashTable *ht = malloc(sizeof(HashTable));
     for (int i=0;i<TABLE_SIZE;i++){
         ht->buckets[i] = NULL;  //init all entries to NULL
     }
+    ht->head = NULL;
+    ht->tail = NULL;
+    ht->count = 0;
+    ht->max_count = max_keys;
     return ht;
 }
 
@@ -40,21 +112,33 @@ void ht_set(HashTable *ht, const char *key, const char *value){
             entry->value = malloc(strlen(value)+1);
             strcpy(entry->value,value);
             entry->expiry = 0;
+            move_to_head(ht, entry);
             return;
         }
         entry = entry->next;
     }
 
+    if (ht->max_count > 0 && ht->count >= ht->max_count){
+        evict(ht);
+    }
+
     //if key is not present
     Entry *new = malloc(sizeof(Entry));
+    if (!new) return;
     new->key = malloc(strlen(key)+1);
     new->value = malloc(strlen(value)+1);
+    if (!new->key || !new->value) return;
     strcpy(new->key,key);
     strcpy(new->value,value);
+    new->lru_next = NULL;
+    new->lru_prev = NULL;
+    new->expiry = 0;
 
     //insert new entry at the start of the linked list
     new->next = ht->buckets[index];
     ht->buckets[index] = new;
+    lru_insert(ht,new);
+    ht->count++;
 }
 
 //lookup key
@@ -73,11 +157,14 @@ char* ht_get(HashTable *ht, const char *key){
                 } else {
                     prev->next = next;
                 }
+                lru_remove(ht,entry);
                 free(entry->key);
                 free(entry->value);
                 free(entry);
+                ht->count--;
                 return NULL;
             }
+            move_to_head(ht,entry);
             return entry->value;
         }
         prev = entry->next;
@@ -99,6 +186,8 @@ void ht_delete(HashTable *ht, const char *key){
             } else {
                 prev->next = entry->next;
             }
+            lru_remove(ht,entry);
+            ht->count--;
             free(entry->key);
             free(entry->value);
             free(entry);
@@ -148,6 +237,8 @@ void ht_rm_expired(HashTable *ht){
                 } else {
                     prev->next = next;
                 }
+                lru_remove(ht,entry);
+                ht->count--;
                 free(entry->key);
                 free(entry->value);
                 free(entry);

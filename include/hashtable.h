@@ -11,15 +11,21 @@ typedef struct Entry{
     char *value;
     time_t expiry;
     struct Entry *next;
+    struct Entry *lru_prev;
+    struct Entry *lru_next;
 } Entry;
 
 //structure of hashtable
 typedef struct Hashtable{
     Entry *buckets[TABLE_SIZE];//array of pointers to entries
+    Entry *head;
+    Entry *tail;
+    int count; //current number of keys
+    int max_count; //if count exceeds maxcount, evict tail key
 } HashTable;
 
 // Function declarations
-HashTable* ht_create(void);
+HashTable* ht_create(int max_keys);
 void ht_set(HashTable *ht, const char *key, const char *value);
 char* ht_get(HashTable *ht, const char *key);
 int ht_ttl(HashTable *ht, const char *key);

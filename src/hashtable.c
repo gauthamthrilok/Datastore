@@ -6,9 +6,9 @@
 
 //static hash function which generates an index between 0 and 64 for any key
 static unsigned int hash(const char *key){
-    int hash = 0;
+    unsigned int hash = 0;
     while (*key){
-        hash = (hash*31) + *key; //ASCII of current character 
+        hash = (hash * 31u) + (unsigned char)*key; //ASCII of current character 
         key++;
     }
     return hash % TABLE_SIZE;
@@ -167,7 +167,7 @@ char* ht_get(HashTable *ht, const char *key){
             move_to_head(ht,entry);
             return entry->value;
         }
-        prev = entry->next;
+        prev = entry;
         entry = entry->next;
     }
     return NULL; //key not found
@@ -245,7 +245,7 @@ void ht_rm_expired(HashTable *ht){
             } else {
                 prev = entry;
             }
-            entry = entry->next;
+            entry = next;
         }
     }
 }

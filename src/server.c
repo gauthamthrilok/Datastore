@@ -250,6 +250,7 @@ void start_server(int port,int max_keys){
                 for (int i=0;i<MAX_CLIENTS;i++){
                     if (clients[i].fd == -1){
                         slot = i;
+                        break;
                     }
                 }
 

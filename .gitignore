@@ -10,6 +10,7 @@
 *.dylib
 *.dll
 *.dSYM/
+data/*.aof
 
 # Common build directories
 build/

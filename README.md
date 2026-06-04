@@ -156,7 +156,7 @@ allocation, no extra memory overhead per key.
 ## Build
 
 ```bash
-# Requirements: clang, make
+# Requirements: gcc, make
 make
 ```
 
